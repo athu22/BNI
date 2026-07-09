@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { Search, Handshake, Users, Plus, X, Calendar, UserPlus } from 'lucide-react';
+import { Search, Handshake, Users, Plus, X, Calendar, UserPlus, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, getDocs, addDoc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { db } from '../../lib/firebase';
 import { useToast } from '../../contexts/ToastContext';
 
@@ -95,6 +97,78 @@ export default function Referrals() {
     return m ? m.memberName : 'Unknown Member';
   };
 
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    
+    doc.setFontSize(18);
+    doc.text("Referrals Report", 14, 22);
+    
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+    const tableData = [];
+    let srNo = 1;
+
+    const getOrder = (code) => {
+      const c = code.toUpperCase();
+      if (c.startsWith('S')) return 1;
+      if (c.startsWith('N')) return 2;
+      if (c.startsWith('E')) return 3;
+      return 4;
+    };
+
+    const sortedMembers = [...members].sort((a, b) => {
+      const codeA = a.memberCode || '';
+      const codeB = b.memberCode || '';
+      const orderA = getOrder(codeA);
+      const orderB = getOrder(codeB);
+      if (orderA !== orderB) return orderA - orderB;
+      return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    sortedMembers.forEach(member => {
+      const refs = aggregated[member.id] || [];
+      if (refs.length > 0) {
+        refs.forEach((ref, index) => {
+          const giver = members.find(m => m.id === ref.giverId);
+          if (index === 0) {
+            tableData.push([
+              { content: srNo++, rowSpan: refs.length, styles: { valign: 'middle' } },
+              { content: `${member.memberName} (${member.memberCode || '-'})`, rowSpan: refs.length, styles: { valign: 'middle', fontStyle: 'bold' } },
+              `${giver ? giver.memberName : 'Unknown'} (${giver ? giver.memberCode || '-' : '-'})`,
+              ref.source
+            ]);
+          } else {
+            tableData.push([
+              `${giver ? giver.memberName : 'Unknown'} (${giver ? giver.memberCode || '-' : '-'})`,
+              ref.source
+            ]);
+          }
+        });
+      } else {
+        tableData.push([
+          { content: srNo++, styles: { valign: 'middle' } },
+          { content: `${member.memberName} (${member.memberCode || '-'})`, styles: { valign: 'middle', fontStyle: 'bold' } },
+          '-',
+          '-'
+        ]);
+      }
+    });
+
+    autoTable(doc, {
+      startY: 35,
+      head: [['Sr No', 'Receiver (Got Referral)', 'Giver (Gave Referral)', 'Source']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [220, 38, 38] }, // bni-red
+      styles: { fontSize: 9 },
+    });
+
+    // Preview the PDF in a new tab instead of saving it directly
+    window.open(doc.output('bloburl'), '_blank');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -102,6 +176,10 @@ export default function Referrals() {
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Global Referrals</h1>
           <p className="text-sm text-gray-500">Track and manage all referrals received by members.</p>
         </div>
+        <Button onClick={handleExportPDF} className="flex items-center gap-2">
+          <Download className="w-4 h-4" />
+          Export to PDF
+        </Button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
